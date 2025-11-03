@@ -1,62 +1,64 @@
 import os
-import requests
 from flask import Flask, request, jsonify
+import requests
+import base64
 
 app = Flask(__name__)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-# Si quieres probar otro modelo más adelante, ponlo en Render como variable MODEL_ID
-MODEL_ID = os.getenv("MODEL_ID", "llama-3.1-8b-instant")
+MODEL_ID = "llama-3.2-11b-vision-preview"
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 if not GROQ_API_KEY:
-    raise RuntimeError("Falta la variable de entorno GROQ_API_KEY")
-
-@app.route("/", methods=["GET"])
-def home():
-    return "Servidor funcionando con Groq ✅"
+    raise RuntimeError("Falta GROQ_API_KEY")
 
 @app.route("/chat", methods=["POST"])
 def chat():
+    data = request.get_json(force=True)
+
+    user_text = data.get("message", "")
+    image_b64 = data.get("image", None)   # ← AQUI RECIBE LA IMAGEN EN BASE64
+
+    messages = []
+
+    if image_b64:
+        messages.append({
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": user_text},
+                {"type": "input_image", "image_url": f"data:image/jpeg;base64,{image_b64}"}
+            ]
+        })
+    else:
+        messages.append({"role": "user", "content": user_text})
+
+    body = {
+        "model": MODEL_ID,
+        "messages": messages
+    }
+
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    r = requests.post(GROQ_CHAT_URL, json=body, headers=headers)
+    result = r.json()
+
+    # Extraer respuesta
     try:
-        data = request.get_json(force=True)
+        reply = result["choices"][0]["message"]["content"]
+    except:
+        reply = "Error analizando respuesta del modelo."
 
-        # Aceptamos dos formatos:
-        # 1) {"message": "hola"}
-        # 2) {"messages": [{ "role": "user", "content": "hola" }, ...]}
-        messages = data.get("messages")
-        if not messages:
-            user_msg = data.get("message")
-            if not user_msg:
-                return jsonify({"error": "Falta 'message' o 'messages' en el body"}), 400
-            messages = [{"role": "user", "content": user_msg}]
+    return jsonify({
+        "reply": reply,
+        "raw": result
+    })
 
-        body = {
-            "model": MODEL_ID,
-            "messages": messages
-        }
-
-        headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json"
-        }
-
-        r = requests.post(GROQ_CHAT_URL, json=body, headers=headers, timeout=60)
-        r.raise_for_status()
-        resp_json = r.json()
-
-        # Intentamos devolver un campo simple "reply" con el texto de la respuesta
-        try:
-            reply = resp_json["choices"][0]["message"]["content"]
-        except Exception:
-            # si viene otro formato, devolvemos toda la respuesta cruda
-            return jsonify({"raw": resp_json})
-
-        return jsonify({"reply": reply, "raw": resp_json})
-    except requests.exceptions.HTTPError as he:
-        return jsonify({"error": "HTTP error al llamar a Groq", "detail": str(he), "resp": getattr(he, "response", None).text if getattr(he, "response", None) else None}), 500
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+@app.route("/", methods=["GET"])
+def root():
+    return "Servidor activo ✅"
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 10000))
