@@ -1,34 +1,40 @@
-from flask import Flask, request, jsonify
-from groq import Groq
 import os
+from flask import Flask, request, jsonify
+import requests
 
 app = Flask(__name__)
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+MODEL_ID = os.getenv("MODEL_ID", "openai/gpt-oss-120b")
+GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+if not GROQ_API_KEY:
+    raise RuntimeError("Falta la variable de entorno GROQ_API_KEY")
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.get_json()
+    data = request.get_json(force=True)
 
-    if not data or "messages" not in data:
-        return jsonify({"error": "No messages provided"}), 400
+    messages = data.get("messages")
+    if not messages:
+        user_msg = data.get("message")
+        if not user_msg:
+            return jsonify({"error": "Falta mensaje"}), 400
+        messages = [{"role": "user", "content": user_msg}]
 
-    try:
-        response = client.chat.completions.create(
-            model="llama3-8b-8192",
-            messages=data["messages"]
-        )
-        reply = response.choices[0].message.content
-        return jsonify({"reply": reply})
+    body = {
+        "model": MODEL_ID,
+        "messages": messages
+    }
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
 
-
-@app.route("/", methods=["GET"])
-def home():
-    return "Backend funcionando ✅", 200
-
+    r = requests.post(GROQ_CHAT_URL, json=body, headers=headers)
+    return jsonify(r.json())
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.getenv("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
