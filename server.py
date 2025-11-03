@@ -5,11 +5,15 @@ import requests
 app = Flask(__name__)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-MODEL_ID = os.getenv("MODEL_ID", "openai/gpt-oss-120b")
+MODEL_ID = os.getenv("MODEL_ID", "llama3-8b-8192")  # ✅ Modelo real de Groq
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 if not GROQ_API_KEY:
     raise RuntimeError("Falta la variable de entorno GROQ_API_KEY")
+
+@app.route("/", methods=["GET"])
+def home():
+    return "Servidor funcionando con Groq ✅"
 
 @app.route("/chat", methods=["POST"])
 def chat():
