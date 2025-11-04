@@ -13,23 +13,18 @@ CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 VISION_URL = "https://api.groq.com/openai/v1/responses"
 
 
-# ✅ Extrae respuesta del modelo de texto
-def extract_chat(raw):
-    try:
-        return raw["choices"][0]["message"]["content"]
-    except:
-        return f"RAW: {raw}"
-
-
-# ✅ Extrae respuesta del modelo de visión
 def extract_vision(raw):
     try:
         return raw["output"][0]["content"][0]["text"]
     except:
-        try:
-            return raw["output_text"]
-        except:
-            return f"RAW: {raw}"
+        return str(raw)
+
+
+def extract_text(raw):
+    try:
+        return raw["choices"][0]["message"]["content"]
+    except:
+        return str(raw)
 
 
 @app.route("/", methods=["GET"])
@@ -59,12 +54,11 @@ def chat():
             json=payload
         )
 
-        raw = r.json()
-        return jsonify({"reply": extract_chat(raw)})
+        return jsonify({"reply": extract_text(r.json())})
 
-    # ✅ TEXTO + IMAGEN
+    # ✅ TEXTO + IMAGEN (VISIÓN)
     else:
-        base64_img = data["image"]
+        base64_data = data["image"]
 
         payload = {
             "model": VISION_MODEL,
@@ -78,7 +72,7 @@ def chat():
                         },
                         {
                             "type": "input_image",
-                            "image_url": f"data:image/jpeg;base64,{base64_img}"
+                            "data": base64_data  # ← AQUÍ VA SOLO EL BASE64
                         }
                     ]
                 }
@@ -94,8 +88,7 @@ def chat():
             json=payload
         )
 
-        raw = r.json()
-        return jsonify({"reply": extract_vision(raw)})
+        return jsonify({"reply": extract_vision(r.json())})
 
 
 if __name__ == "__main__":
