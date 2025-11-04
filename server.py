@@ -1,65 +1,99 @@
-import os
 from flask import Flask, request, jsonify
 import requests
-import base64
+import os
 
 app = Flask(__name__)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-MODEL_ID = "llama-3.2-11b-vision-preview"
-GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-if not GROQ_API_KEY:
-    raise RuntimeError("Falta GROQ_API_KEY")
+TEXT_MODEL = "llama-3.1-8b-instant"
+VISION_MODEL = "llama-3.2-vision-11b"
+
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+
+def extract_reply(raw):
+    """
+    ✅ Groq Vision NUEVO FORMATO:
+    content = [
+        { "type": "output_text", "text": "respuesta" }
+    ]
+    """
+    try:
+        content = raw["choices"][0]["message"]["content"]
+
+        # Si ya es texto normal
+        if isinstance(content, str):
+            return content
+
+        # Si es lista (visión)
+        if isinstance(content, list):
+            for item in content:
+                if item.get("type") == "output_text":
+                    return item.get("text")
+            return "[No se encontró texto en la respuesta]"
+
+    except:
+        return "Error analizando respuesta del modelo."
+
+
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"status": "Servidor activo ✅"})
+
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.get_json(force=True)
-
-    user_text = data.get("message", "")
-    image_b64 = data.get("image", None)   # ← AQUI RECIBE LA IMAGEN EN BASE64
-
-    messages = []
-
-    if image_b64:
-        messages.append({
-            "role": "user",
-            "content": [
-                {"type": "input_text", "text": user_text},
-                {"type": "input_image", "image_url": f"data:image/jpeg;base64,{image_b64}"}
-            ]
-        })
-    else:
-        messages.append({"role": "user", "content": user_text})
-
-    body = {
-        "model": MODEL_ID,
-        "messages": messages
-    }
-
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    r = requests.post(GROQ_CHAT_URL, json=body, headers=headers)
-    result = r.json()
-
-    # Extraer respuesta
     try:
-        reply = result["choices"][0]["message"]["content"]
-    except:
-        reply = "Error analizando respuesta del modelo."
+        data = request.json
 
-    return jsonify({
-        "reply": reply,
-        "raw": result
-    })
+        # ✅ SOLO TEXTO
+        if "message" in data and "image" not in data:
+            payload = {
+                "model": TEXT_MODEL,
+                "messages": [
+                    {"role": "user", "content": data["message"]}
+                ]
+            }
 
-@app.route("/", methods=["GET"])
-def root():
-    return "Servidor activo ✅"
+        # ✅ TEXTO + IMAGEN (base64)
+        elif "image" in data:
+            payload = {
+                "model": VISION_MODEL,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": data.get("message", "")},
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:image/jpeg;base64,{data['image']}"
+                            }
+                        ]
+                    }
+                ]
+            }
+
+        else:
+            return jsonify({"error": "Formato inválido"}), 400
+
+        r = requests.post(
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json=payload
+        )
+
+        raw = r.json()
+        reply = extract_reply(raw)
+
+        return jsonify({"reply": reply, "raw": raw})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=10000)
