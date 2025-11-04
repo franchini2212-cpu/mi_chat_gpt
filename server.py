@@ -1,78 +1,61 @@
 from flask import Flask, request, jsonify
 from groq import Groq
-import base64
 import os
 
 app = Flask(__name__)
-client = Groq(api_key=os.environ["GROQ_API_KEY"])
+
+API_KEY = os.environ.get("GROQ_API_KEY")
+
+cliente = Groq(api_key=API_KEY)
 
 @app.route("/", methods=["GET"])
 def home():
-    return "✅ Servidor activo"
+    return "✅ Servidor activo", 200
+
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    try:
-        data = request.get_json()
+    data = request.get_json()
 
-        # ------------------------------
-        # ✅ SI VIENE TEXTO
-        # ------------------------------
-        if "message" in data:
-            text = data["message"]
+    # -----------------------------------------
+    # Si viene TEXTO
+    # -----------------------------------------
+    if "message" in data:
+        user_msg = data["message"]
 
-            completion = client.chat.completions.create(
-                model="llama3-8b-8192",
-                messages=[
-                    {"role": "user", "content": text}
-                ]
-            )
+        respuesta = cliente.chat.completions.create(
+            model="llama-3.2-11b-vision-preview",
+            messages=[
+                {"role": "user", "content": user_msg}
+            ]
+        )
 
-            reply = completion.choices[0].message["content"]
-            return jsonify({"reply": reply})
+        reply = respuesta.choices[0].message.content
+        return jsonify({"reply": reply})
 
-        # ------------------------------
-        # ✅ SI VIENE IMAGEN BASE64
-        # ------------------------------
-        if "image" in data:
-            b64 = data["image"]
+    # -----------------------------------------
+    # Si viene IMAGEN BASE64
+    # -----------------------------------------
+    if "image" in data:
+        b64 = data["image"]
 
-            # Groq Vision necesita esto:
-            msg = [
+        respuesta = cliente.chat.completions.create(
+            model="llama-3.2-11b-vision-preview",
+            messages=[
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Describe la imagen"},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": "data:image/jpeg;base64," + b64
-                            }
-                        }
+                        {"type": "input_text", "text": "Describe esta imagen"},
+                        {"type": "input_image", "image_url": f"data:image/jpeg;base64,{b64}"}
                     ]
                 }
             ]
+        )
 
-            completion = client.chat.completions.create(
-                model="llama-vision",
-                messages=msg
-            )
+        reply = respuesta.choices[0].message.content
+        return jsonify({"reply": reply})
 
-            raw = completion  # <-- Para debug
-            reply = completion.choices[0].message["content"]
-
-            return jsonify({
-                "reply": reply,
-                "raw": raw.dict()  # Muestra TODO para debug
-            })
-
-        # ------------------------------
-        # ❌ Si no trae nada válido
-        # ------------------------------
-        return jsonify({"error": "Invalid request"}), 400
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"reply": "Solicitud inválida"}), 400
 
 
 if __name__ == "__main__":
