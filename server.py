@@ -12,22 +12,17 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
 def extract_reply(data):
-    """
-    Extrae texto de modelos normales y vision.
-    """
     try:
         msg = data["choices"][0]["message"]["content"]
 
-        # Respuesta tipo string (texto normal)
         if isinstance(msg, str):
             return msg
 
-        # Respuesta tipo lista (Vision)
         if isinstance(msg, list):
             for block in msg:
                 if block.get("type") == "output_text":
                     return block.get("text")
-        return "[No se encontró texto]"
+        return "No se encontró texto."
     except:
         return "Error analizando respuesta del modelo."
 
@@ -42,16 +37,12 @@ def chat():
     try:
         data = request.get_json()
 
-        # ✅ Texto
         if "message" in data and "image" not in data:
             payload = {
                 "model": TEXT_MODEL,
-                "messages": [
-                    {"role": "user", "content": data["message"]}
-                ]
+                "messages": [{"role": "user", "content": data["message"]}]
             }
 
-        # ✅ Imagen base64
         elif "image" in data:
             payload = {
                 "model": VISION_MODEL,
@@ -60,10 +51,8 @@ def chat():
                         "role": "user",
                         "content": [
                             {"type": "input_text", "text": data.get("message", "Describe esto")},
-                            {
-                                "type": "input_image",
-                                "image_url": f"data:image/jpeg;base64,{data['image']}"
-                            }
+                            {"type": "input_image",
+                             "image_url": f"data:image/jpeg;base64,{data['image']}"}
                         ]
                     }
                 ]
@@ -72,7 +61,6 @@ def chat():
         else:
             return jsonify({"error": "Formato inválido"}), 400
 
-        # ✅ Llamada a Groq con requests
         r = requests.post(
             GROQ_URL,
             headers={
@@ -85,10 +73,11 @@ def chat():
         raw = r.json()
         reply = extract_reply(raw)
 
-        return jsonify({"reply": reply, "raw": raw})
+        # ✅ SOLO ESTO — YA SIN RAW
+        return jsonify({"reply": reply})
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"reply": f"Error: {str(e)}"})
 
 
 if __name__ == "__main__":
