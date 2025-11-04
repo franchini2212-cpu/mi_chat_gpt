@@ -1,96 +1,78 @@
 from flask import Flask, request, jsonify
-import requests
+from groq import Groq
+import base64
 import os
 
 app = Flask(__name__)
-
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-TEXT_MODEL = "llama-3.1-8b-instant"
-VISION_MODEL = "llama-3.2-vision-11b"
-
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-
-
-def extract_reply(raw):
-    try:
-        content = raw["choices"][0]["message"]["content"]
-
-        # Solo texto
-        if isinstance(content, str):
-            return content
-
-        # Vision → lista con output_text
-        if isinstance(content, list):
-            for item in content:
-                if item.get("type") == "output_text":
-                    return item["text"]
-
-        return "No se encontró texto en la respuesta."
-    except:
-        return "Error analizando respuesta del modelo."
-
+client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"status": "Servidor activo ✅"})
-
+    return "✅ Servidor activo"
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.json
-    if not data:
-        return jsonify({"error": "JSON inválido"}), 400
+    try:
+        data = request.get_json()
 
-    # ✅ SOLO TEXTO
-    if "message" in data and "image" not in data:
-        payload = {
-            "model": TEXT_MODEL,
-            "messages": [
-                {"role": "user", "content": data["message"]}
-            ]
-        }
+        # ------------------------------
+        # ✅ SI VIENE TEXTO
+        # ------------------------------
+        if "message" in data:
+            text = data["message"]
 
-    # ✅ SOLO IMAGEN (base64)
-    elif "image" in data:
-        payload = {
-            "model": VISION_MODEL,
-            "messages": [
+            completion = client.chat.completions.create(
+                model="llama3-8b-8192",
+                messages=[
+                    {"role": "user", "content": text}
+                ]
+            )
+
+            reply = completion.choices[0].message["content"]
+            return jsonify({"reply": reply})
+
+        # ------------------------------
+        # ✅ SI VIENE IMAGEN BASE64
+        # ------------------------------
+        if "image" in data:
+            b64 = data["image"]
+
+            # Groq Vision necesita esto:
+            msg = [
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": "Analiza esta imagen."},
+                        {"type": "text", "text": "Describe la imagen"},
                         {
-                            "type": "input_image",
-                            "image_url": f"data:image/jpeg;base64,{data['image']}"
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/jpeg;base64," + b64
+                            }
                         }
                     ]
                 }
             ]
-        }
 
-    else:
-        return jsonify({"error": "Formato inválido"}), 400
+            completion = client.chat.completions.create(
+                model="llama-vision",
+                messages=msg
+            )
 
-    r = requests.post(
-        GROQ_URL,
-        headers={
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json"
-        },
-        json=payload
-    )
+            raw = completion  # <-- Para debug
+            reply = completion.choices[0].message["content"]
 
-    try:
-        raw = r.json()
-        reply = extract_reply(raw)
-        return jsonify({"reply": reply})
+            return jsonify({
+                "reply": reply,
+                "raw": raw.dict()  # Muestra TODO para debug
+            })
+
+        # ------------------------------
+        # ❌ Si no trae nada válido
+        # ------------------------------
+        return jsonify({"error": "Invalid request"}), 400
+
     except Exception as e:
-        return jsonify({
-            "error": "Error procesando respuesta del modelo",
-            "detail": str(e),
-            "raw": r.text
-        })
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
