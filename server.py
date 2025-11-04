@@ -7,27 +7,16 @@ app = Flask(__name__)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 TEXT_MODEL = "llama-3.1-8b-instant"
-VISION_MODEL = "llama-3.2-vision-11b"
+VISION_MODEL = "llama-3.2-11b-vision-preview"
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
 def extract_reply(raw):
     try:
-        content = raw["choices"][0]["message"]["content"]
-
-        if isinstance(content, str):
-            return content
-
-        if isinstance(content, list):
-            for item in content:
-                if item.get("type") == "output_text":
-                    return item.get("text")
-
-        return "No se encontró texto en la respuesta."
-
-    except Exception as e:
-        return f"ERROR EXTRACTION: {str(e)}"
+        return raw["choices"][0]["message"]["content"]
+    except:
+        return "Error analizando respuesta del modelo."
 
 
 @app.route("/", methods=["GET"])
@@ -40,34 +29,27 @@ def chat():
     try:
         data = request.json
 
-        # ✅ SOLO TEXTO
+        # ✅ Mensaje solo texto
         if "image" not in data:
             payload = {
                 "model": TEXT_MODEL,
                 "messages": [
                     {
                         "role": "user",
-                        "content": [
-                            {"type": "text", "text": data["message"]}
-                        ]
+                        "content": data["message"]
                     }
                 ]
             }
 
-        # ✅ TEXTO + IMAGEN
+        # ✅ Mensaje con imagen base64
         else:
             payload = {
                 "model": VISION_MODEL,
                 "messages": [
                     {
                         "role": "user",
-                        "content": [
-                            {"type": "text", "text": data.get("message", "")},
-                            {
-                                "type": "image_url",
-                                "image_url": f"data:image/jpeg;base64,{data['image']}"
-                            }
-                        ]
+                        "content": data.get("message", ""),
+                        "images": [data["image"]]  # base64 directo
                     }
                 ]
             }
@@ -86,8 +68,7 @@ def chat():
         if "error" in raw:
             return jsonify({"reply": f"ERROR GROQ: {raw['error']}"}), 400
 
-        respuesta = extract_reply(raw)
-        return jsonify({"reply": respuesta})
+        return jsonify({"reply": extract_reply(raw)})
 
     except Exception as e:
         return jsonify({"reply": f"ERROR SERVER: {str(e)}"}), 500
