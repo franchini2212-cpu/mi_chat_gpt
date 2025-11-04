@@ -9,95 +9,94 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 TEXT_MODEL = "llama-3.1-8b-instant"
 VISION_MODEL = "llama-3.2-11b-vision-preview"
 
-GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_VISION_URL = "https://api.groq.com/openai/v1/responses"
+CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
+VISION_URL = "https://api.groq.com/openai/v1/responses"
 
 
-def extract_reply_chat(raw):
+# ✅ Extrae respuesta del modelo de texto
+def extract_chat(raw):
     try:
         return raw["choices"][0]["message"]["content"]
     except:
-        return "Error analizando respuesta (chat)."
+        return f"RAW: {raw}"
 
 
-def extract_reply_vision(raw):
+# ✅ Extrae respuesta del modelo de visión
+def extract_vision(raw):
     try:
-        return raw["output_text"]
+        return raw["output"][0]["content"][0]["text"]
     except:
-        return "Error analizando respuesta (visión)."
+        try:
+            return raw["output_text"]
+        except:
+            return f"RAW: {raw}"
 
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"status": "Servidor activo ✅"})
+    return jsonify({"status": "servidor activo ✅"})
 
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    try:
-        data = request.json
+    data = request.json
 
-        # ✅ Solo texto → usar chat/completions
-        if "image" not in data:
-            payload = {
-                "model": TEXT_MODEL,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": data["message"]
-                    }
-                ]
-            }
+    # ✅ SOLO TEXTO
+    if "image" not in data:
+        payload = {
+            "model": TEXT_MODEL,
+            "messages": [
+                {"role": "user", "content": data["message"]}
+            ]
+        }
 
-            r = requests.post(
-                GROQ_CHAT_URL,
-                headers={
-                    "Authorization": f"Bearer {GROQ_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json=payload
-            )
+        r = requests.post(
+            CHAT_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json=payload
+        )
 
-            raw = r.json()
+        raw = r.json()
+        return jsonify({"reply": extract_chat(raw)})
 
-            if "error" in raw:
-                return jsonify({"reply": f"ERROR CHAT: {raw['error']}"}), 400
+    # ✅ TEXTO + IMAGEN
+    else:
+        base64_img = data["image"]
 
-            return jsonify({"reply": extract_reply_chat(raw)})
+        payload = {
+            "model": VISION_MODEL,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": data.get("message", "")
+                        },
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:image/jpeg;base64,{base64_img}"
+                        }
+                    ]
+                }
+            ]
+        }
 
-        # ✅ Imagen → usar /responses
-        else:
-            payload = {
-                "model": VISION_MODEL,
-                "input": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": data.get("message", "")},
-                            {
-                                "type": "input_image",
-                                "image_url": f"data:image/jpeg;base64,{data['image']}"
-                            }
-                        ]
-                    }
-                ]
-            }
+        r = requests.post(
+            VISION_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json=payload
+        )
 
-            r = requests.post(
-                GROQ_VISION_URL,
-                headers={
-                    "Authorization": f"Bearer {GROQ_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json=payload
-            )
+        raw = r.json()
+        return jsonify({"reply": extract_vision(raw)})
 
-            raw = r.json()
 
-            if "error" in raw:
-                return jsonify({"reply": f"ERROR VISION: {raw['error']}"}), 400
-
-            return jsonify({"reply": extract_reply_vision(raw)})
-
-    except Exception as e:
-        return jsonify({"reply": f"SERVER ERROR: {str(e)}"}), 500
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
