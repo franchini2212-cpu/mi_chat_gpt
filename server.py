@@ -7,33 +7,24 @@ app = Flask(__name__)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 TEXT_MODEL = "llama-3.1-8b-instant"
-VISION_MODEL = "llama-3.2-vision-11b"
+VISION_MODEL = "llama-3.2-11b-vision-preview"   # ✅ NOMBRE REAL
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
 def extract_reply(raw):
-    """
-    ✅ NUEVO FORMATO DE GROQ PARA VISIÓN:
-    content = [
-        { "type": "output_text", "text": "respuesta" }
-    ]
-    """
     try:
         content = raw["choices"][0]["message"]["content"]
 
-        # Caso texto plano
         if isinstance(content, str):
             return content
 
-        # Caso lista (visión)
         if isinstance(content, list):
             for item in content:
                 if item.get("type") == "output_text":
-                    return item.get("text")
+                    return item["text"]
 
         return "[No se encontró texto en la respuesta]"
-
     except Exception as e:
         return f"ERROR EXTRACTION: {str(e)}"
 
@@ -57,7 +48,7 @@ def chat():
                 ]
             }
 
-        # ✅ TEXTO + IMAGEN (Base64)
+        # ✅ TEXTO + IMAGEN
         elif "image" in data:
             payload = {
                 "model": VISION_MODEL,
@@ -65,14 +56,8 @@ def chat():
                     {
                         "role": "user",
                         "content": [
-                            {
-                                "type": "input_text",
-                                "text": data.get("message", "Describe la imagen.")
-                            },
-                            {
-                                "type": "input_image",
-                                "image_url": f"data:image/jpeg;base64,{data['image']}"
-                            }
+                            {"type": "input_text", "text": data.get("message", "")},
+                            {"type": "input_image", "image": data["image"]}  # ✅ SOLO BASE64
                         ]
                     }
                 ]
@@ -81,7 +66,6 @@ def chat():
         else:
             return jsonify({"error": "Formato inválido"}), 400
 
-        # ✅ Enviar a Groq
         r = requests.post(
             GROQ_URL,
             headers={
@@ -92,13 +76,11 @@ def chat():
         )
 
         raw = r.json()
-
-        # ✅ Intentar extraer la respuesta
         reply = extract_reply(raw)
 
         return jsonify({
             "reply": reply,
-            "raw": raw   # ← IMPORTANTE: ENVÍA EL JSON PARA VER ERRORES
+            "raw": raw
         })
 
     except Exception as e:
