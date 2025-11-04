@@ -7,37 +7,43 @@ app = Flask(__name__)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 TEXT_MODEL = "llama-3.1-8b-instant"
-VISION_MODEL = "llama-3.2-11b-vision-preview"
+VISION_MODEL = "llama-3.2-vision-11b"
 
-CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
-VISION_URL = "https://api.groq.com/openai/v1/responses"
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
-def extract_vision(raw):
+def extract_reply(raw):
     try:
-        return raw["output"][0]["content"][0]["text"]
-    except:
-        return str(raw)
+        content = raw["choices"][0]["message"]["content"]
 
+        # Solo texto
+        if isinstance(content, str):
+            return content
 
-def extract_text(raw):
-    try:
-        return raw["choices"][0]["message"]["content"]
+        # Vision → lista con output_text
+        if isinstance(content, list):
+            for item in content:
+                if item.get("type") == "output_text":
+                    return item["text"]
+
+        return "No se encontró texto en la respuesta."
     except:
-        return str(raw)
+        return "Error analizando respuesta del modelo."
 
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"status": "servidor activo ✅"})
+    return jsonify({"status": "Servidor activo ✅"})
 
 
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.json
+    if not data:
+        return jsonify({"error": "JSON inválido"}), 400
 
     # ✅ SOLO TEXTO
-    if "image" not in data:
+    if "message" in data and "image" not in data:
         payload = {
             "model": TEXT_MODEL,
             "messages": [
@@ -45,50 +51,46 @@ def chat():
             ]
         }
 
-        r = requests.post(
-            CHAT_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json=payload
-        )
-
-        return jsonify({"reply": extract_text(r.json())})
-
-    # ✅ TEXTO + IMAGEN (VISIÓN)
-    else:
-        base64_data = data["image"]
-
+    # ✅ SOLO IMAGEN (base64)
+    elif "image" in data:
         payload = {
             "model": VISION_MODEL,
-            "input": [
+            "messages": [
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "text",
-                            "text": data.get("message", "")
-                        },
+                        {"type": "input_text", "text": "Analiza esta imagen."},
                         {
                             "type": "input_image",
-                            "data": base64_data  # ← AQUÍ VA SOLO EL BASE64
+                            "image_url": f"data:image/jpeg;base64,{data['image']}"
                         }
                     ]
                 }
             ]
         }
 
-        r = requests.post(
-            VISION_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json=payload
-        )
+    else:
+        return jsonify({"error": "Formato inválido"}), 400
 
-        return jsonify({"reply": extract_vision(r.json())})
+    r = requests.post(
+        GROQ_URL,
+        headers={
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        },
+        json=payload
+    )
+
+    try:
+        raw = r.json()
+        reply = extract_reply(raw)
+        return jsonify({"reply": reply})
+    except Exception as e:
+        return jsonify({
+            "error": "Error procesando respuesta del modelo",
+            "detail": str(e),
+            "raw": r.text
+        })
 
 
 if __name__ == "__main__":
