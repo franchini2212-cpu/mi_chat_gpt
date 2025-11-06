@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 import requests
 import os
-import json # Necesario para procesar la respuesta de Gemini
+import json 
 
 app = Flask(__name__)
 
@@ -71,8 +71,8 @@ def chat():
                     ]
                 }
             ],
-            # Opcional: configurar generación (ej. para forzar solo texto)
-            "config": {
+            # ¡CORRECCIÓN AQUÍ! Debe ser "generationConfig"
+            "generationConfig": { 
                 "responseMimeType": "text/plain" 
             }
         }
