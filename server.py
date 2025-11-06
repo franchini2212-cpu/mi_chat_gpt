@@ -1,9 +1,14 @@
 from flask import Flask, request, jsonify
 import requests
 import os
+import logging
+
+# ✅ Logging para ver errores reales en Render
+logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
 
+# ✅ Modelos Groq
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 TEXT_MODEL = "llama-3.1-8b-instant"
 VISION_MODEL = "llama-3.2-11b-vision-preview"
@@ -11,38 +16,66 @@ VISION_MODEL = "llama-3.2-11b-vision-preview"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
+# ✅ EXTRACT REPLY SUPER ROBUSTO
 def extract_reply(data):
     try:
-        msg = data["choices"][0]["message"]["content"]
+        if not data or "choices" not in data or len(data["choices"]) == 0:
+            logging.info("Respuesta sin choices")
+            logging.info(f"RAW: {data}")
+            return "Respuesta inválida del modelo."
 
-        if isinstance(msg, str):
-            return msg
+        content = data["choices"][0]["message"]["content"]
 
-        if isinstance(msg, list):
-            for block in msg:
-                if block.get("type") == "output_text":
-                    return block.get("text")
-        return "No se encontró texto."
-    except:
-        return "Error analizando respuesta del modelo."
+        # ✅ Caso simple (string)
+        if isinstance(content, str):
+            return content
+
+        # ✅ Caso lista de bloques (Vision)
+        if isinstance(content, list):
+            textos = []
+            for block in content:
+                tipo = block.get("type")
+
+                # Groq Vision puede devolver: output_text, text, o otros
+                if tipo in ["output_text", "text"]:
+                    t = block.get("text")
+                    if t:
+                        textos.append(t)
+
+            if textos:
+                return " ".join(textos)
+
+        logging.info("No se pudo extraer texto, RAW:")
+        logging.info(data)
+        return "No pude extraer texto de la respuesta."
+
+    except Exception as e:
+        logging.exception("Error en extract_reply")
+        return f"Error en extract_reply: {str(e)}"
 
 
+# ✅ RUTA PRINCIPAL
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"status": "Servidor activo ✅"})
 
 
+# ✅ RUTA DE CHAT (texto o imagen)
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
         data = request.get_json()
 
+        # ✅ TEXTO NORMAL
         if "message" in data and "image" not in data:
             payload = {
                 "model": TEXT_MODEL,
-                "messages": [{"role": "user", "content": data["message"]}]
+                "messages": [
+                    {"role": "user", "content": data["message"]}
+                ]
             }
 
+        # ✅ IMAGEN + mensaje opcional
         elif "image" in data:
             payload = {
                 "model": VISION_MODEL,
@@ -50,7 +83,7 @@ def chat():
                     {
                         "role": "user",
                         "content": [
-                            {"type": "input_text", "text": data.get("message", "Describe esto")},
+                            {"type": "text", "text": data.get("message", "Describe esta imagen")},
                             {"type": "input_image",
                              "image_url": f"data:image/jpeg;base64,{data['image']}"}
                         ]
@@ -61,6 +94,7 @@ def chat():
         else:
             return jsonify({"error": "Formato inválido"}), 400
 
+        # ✅ Llamada a Groq
         r = requests.post(
             GROQ_URL,
             headers={
@@ -73,10 +107,10 @@ def chat():
         raw = r.json()
         reply = extract_reply(raw)
 
-        # ✅ SOLO ESTO — YA SIN RAW
         return jsonify({"reply": reply})
 
     except Exception as e:
+        logging.exception("Error en /chat")
         return jsonify({"reply": f"Error: {str(e)}"})
 
 
