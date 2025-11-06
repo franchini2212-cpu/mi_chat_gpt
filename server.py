@@ -1,17 +1,29 @@
-import os
-
-for proxy in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
-    os.environ.pop(proxy, None)
-
 from flask import Flask, request, jsonify
-from groq import Groq
+import requests
+import os
 
 app = Flask(__name__)
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 TEXT_MODEL = "llama-3.1-8b-instant"
 VISION_MODEL = "llama-3.2-11b-vision-preview"
+
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+def extract_reply(data):
+    try:
+        msg = data["choices"][0]["message"]["content"]
+
+        if isinstance(msg, str):
+            return msg
+
+        if isinstance(msg, list):
+            for block in msg:
+                if block.get("type") == "output_text":
+                    return block.get("text")
+        return "No se encontró texto."
+    except:
+        return "Respuesta inválida del modelo."
 
 @app.route("/", methods=["GET"])
 def home():
@@ -22,19 +34,24 @@ def chat():
     try:
         data = request.get_json()
 
-        if "image" not in data:
-            completion = client.chat.completions.create(
-                model=TEXT_MODEL,
-                messages=[{"role": "user", "content": data["message"]}]
-            )
-        else:
-            completion = client.chat.completions.create(
-                model=VISION_MODEL,
-                messages=[
+        # TEXTO
+        if "message" in data and "image" not in data:
+            payload = {
+                "model": TEXT_MODEL,
+                "messages": [
+                    {"role": "user", "content": data["message"]}
+                ]
+            }
+
+        # IMAGEN
+        elif "image" in data:
+            payload = {
+                "model": VISION_MODEL,
+                "messages": [
                     {
                         "role": "user",
                         "content": [
-                            {"type": "input_text", "text": data.get("message", "Describe la imagen")},
+                            {"type": "input_text", "text": data.get("message", "Describe esto")},
                             {
                                 "type": "input_image",
                                 "image_url": f"data:image/png;base64,{data['image']}"
@@ -42,9 +59,21 @@ def chat():
                         ]
                     }
                 ]
-            )
+            }
 
-        reply = completion.choices[0].message.content
+        else:
+            return jsonify({"reply": "Formato inválido"}), 400
+
+        r = requests.post(
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json=payload
+        )
+
+        reply = extract_reply(r.json())
         return jsonify({"reply": reply})
 
     except Exception as e:
