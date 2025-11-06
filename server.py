@@ -5,6 +5,7 @@ import os
 app = Flask(__name__)
 
 API_KEY = os.getenv("GROQ_API_KEY")
+
 TEXT_MODEL = "llama-3.1-8b-instant"
 VISION_MODEL = "llama-3.2-11b-vision-preview"
 
@@ -28,7 +29,7 @@ def chat():
     try:
         data = request.get_json()
 
-        # --- Caso texto ---
+        # ✅ SOLO TEXTO
         if "image" not in data:
             payload = {
                 "model": TEXT_MODEL,
@@ -37,8 +38,10 @@ def chat():
                 ]
             }
 
-        # --- Caso imagen ---
+        # ✅ TEXTO + IMAGEN (BASE64)
         else:
+            base64_image = data["image"]
+
             payload = {
                 "model": VISION_MODEL,
                 "messages": [
@@ -46,7 +49,12 @@ def chat():
                         "role": "user",
                         "content": [
                             {"type": "text", "text": data.get("message", "Describe esto")},
-                            {"type": "input_image", "image": data["image"]}
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_image}"
+                                }
+                            }
                         ]
                     }
                 ]
@@ -54,7 +62,10 @@ def chat():
 
         r = requests.post(
             GROQ_URL,
-            headers={"Authorization": f"Bearer {API_KEY}"},
+            headers={
+                "Authorization": f"Bearer {API_KEY}",
+                "Content-Type": "application/json"
+            },
             json=payload
         )
 
