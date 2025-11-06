@@ -1,13 +1,16 @@
+import os
+
+# ✅ QUITAR PROXIES DE RENDER ANTES DE TODO
+for proxy in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
+    if proxy in os.environ:
+        del os.environ[proxy]
+
 from flask import Flask, request, jsonify
 from groq import Groq
-import os
 
 app = Flask(__name__)
 
-# ✅ Render agrega proxies que rompen Groq — los quitamos
-for proxy in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
-    os.environ.pop(proxy, None)
-
+# ✅ Inicializamos Groq sin proxies
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 TEXT_MODEL = "llama-3.1-8b-instant"
@@ -22,14 +25,14 @@ def chat():
     try:
         data = request.get_json()
 
-        # ✅ Solo texto
+        # ✅ Solo mensaje
         if "image" not in data:
             completion = client.chat.completions.create(
                 model=TEXT_MODEL,
                 messages=[{"role": "user", "content": data["message"]}]
             )
 
-        # ✅ Texto + imagen
+        # ✅ Mensaje + imagen
         else:
             completion = client.chat.completions.create(
                 model=VISION_MODEL,
