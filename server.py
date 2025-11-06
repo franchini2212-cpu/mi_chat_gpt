@@ -4,6 +4,10 @@ import os
 
 app = Flask(__name__)
 
+# ✅ Render agrega proxies que rompen Groq — los quitamos
+for proxy in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
+    os.environ.pop(proxy, None)
+
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 TEXT_MODEL = "llama-3.1-8b-instant"
@@ -25,7 +29,7 @@ def chat():
                 messages=[{"role": "user", "content": data["message"]}]
             )
 
-        # ✅ Texto + Imagen
+        # ✅ Texto + imagen
         else:
             completion = client.chat.completions.create(
                 model=VISION_MODEL,
