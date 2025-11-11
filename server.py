@@ -1,71 +1,85 @@
 from flask import Flask, request, jsonify
 import psycopg2
 import psycopg2.extras
-import base64
-import json
 
 app = Flask(__name__)
 
-# ✅ CONEXIÓN A POSTGRES (Render)
+# ✅ URL de tu base de datos PostgreSQL en Render
 DB_URL = "postgresql://mi_base_de_datos_7ap6_user:6bOxgNN8k3NJf1ZNJCMT8yebHbWdI4PC@dpg-d49ioivgi27c73ccefq0-a.oregon-postgres.render.com/mi_base_de_datos_7ap6"
 
-conn = psycopg2.connect(DB_URL)
-cur = conn.cursor()
 
-# ✅ Crear tabla si no existe
-cur.execute("""
-CREATE TABLE IF NOT EXISTS mensajes (
-    id SERIAL PRIMARY KEY,
-    rol TEXT NOT NULL,
-    contenido TEXT,
-    imagen TEXT,
-    timestamp TIMESTAMP DEFAULT NOW()
-)
-""")
-conn.commit()
+# ✅ Función para obtener conexión por request
+def get_db():
+    conn = psycopg2.connect(DB_URL)
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    return conn, cur
 
 
-# ✅ Guardar mensaje
+# ✅ Crear tabla una sola vez al iniciar
+def init_db():
+    conn, cur = get_db()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS mensajes (
+            id SERIAL PRIMARY KEY,
+            rol TEXT NOT NULL,
+            contenido TEXT,
+            imagen TEXT,
+            timestamp TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+init_db()  # ✅ Solo una vez, al inicio del servidor
+
+
+# ✅ Guardar mensaje en la BD
 def guardar_mensaje(rol, contenido, imagen=None):
+    conn, cur = get_db()
     cur.execute(
         "INSERT INTO mensajes (rol, contenido, imagen) VALUES (%s, %s, %s)",
         (rol, contenido, imagen)
     )
     conn.commit()
+    conn.close()
 
 
-# ✅ Cargar historial completo
+# ✅ Cargar historial completo desde la BD
 def cargar_historial():
+    conn, cur = get_db()
     cur.execute("SELECT rol, contenido, imagen FROM mensajes ORDER BY id ASC")
     rows = cur.fetchall()
+    conn.close()
 
     historial = []
     for r in rows:
-        if r[2]:  # imagen
+        if r["imagen"]:  # Si tiene imagen guardada
             historial.append({
-                "role": r[0],
-                "image": r[2]
+                "role": r["rol"],
+                "image": r["imagen"]
             })
         else:
             historial.append({
-                "role": r[0],
-                "content": r[1]
+                "role": r["rol"],
+                "content": r["contenido"]
             })
+
     return historial
 
 
-# ✅ Gemini analiza imagen
+# ✅ Gemini analiza imágenes (versión falsa para pruebas)
 def gemini_describe_image(base64_img, prompt):
-    return f"[Análisis falso de Gemini para pruebas: {prompt}]"
+    return f"[Análisis de Gemini]: {prompt}"
 
 
-# ✅ Groq responde
+# ✅ Groq responde (falso para pruebas)
 def groq_chat(messages):
     texto = "\n".join([m.get("content", "") for m in messages])
     return "Groq respondió según historial:\n\n" + texto
 
 
-# ✅ RUTA PRINCIPAL /chat
+# ✅ Ruta principal del chat
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.get_json()
@@ -73,32 +87,29 @@ def chat():
     base64_img = data.get("image")
     user_text = data.get("message", "")
 
-    # ✅ Cargar historial desde BD
+    # ✅ Cargar historial desde base de datos
     history = cargar_historial()
 
     groq_messages = []
 
-    # ✅ Convertir HISTORIAL para Groq
+    # ✅ Convertir historial al formato Groq
     for h in history:
-
-        if "content" in h and h["content"]:
+        if "content" in h:
             groq_messages.append({
                 "role": h["role"],
                 "content": h["content"]
             })
 
-        elif "image" in h and h["image"]:
+        elif "image" in h:
             gemini_analysis = gemini_describe_image(
-                h["image"],
-                "Describe esta imagen de manera detallada."
+                h["image"], "Describe esta imagen."
             )
-
             groq_messages.append({
                 "role": h["role"],
-                "content": f"[Imagen anterior analizada por Gemini]:\n\n{gemini_analysis}"
+                "content": f"[Imagen previa analizada]: {gemini_analysis}"
             })
 
-    # ✅ Si viene imagen nueva
+    # ✅ Si el usuario envía imagen
     if base64_img:
         gemini_analysis = gemini_describe_image(
             base64_img,
@@ -107,10 +118,10 @@ def chat():
 
         groq_messages.append({
             "role": "user",
-            "content": f"El usuario envió una nueva imagen:\n\n{gemini_analysis}"
+            "content": f"Nueva imagen del usuario:\n{gemini_analysis}"
         })
 
-        # ✅ GUARDAR mensaje en BD
+        # ✅ Guardar imagen y análisis
         guardar_mensaje("user", None, base64_img)
         guardar_mensaje("system", gemini_analysis)
 
@@ -120,7 +131,7 @@ def chat():
 
         return jsonify({"reply": final})
 
-    # ✅ Si viene solo texto
+    # ✅ Si es solo texto
     groq_messages.append({
         "role": "user",
         "content": user_text
@@ -137,7 +148,7 @@ def chat():
 
 @app.route("/")
 def home():
-    return "Servidor con historial persistente ✅"
+    return "Servidor funcionando con historial permanente ✅"
 
 
 if __name__ == "__main__":
