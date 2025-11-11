@@ -1,162 +1,144 @@
 from flask import Flask, request, jsonify
-import requests
-import os
+import psycopg2
+import psycopg2.extras
+import base64
 import json
 
 app = Flask(__name__)
 
-# ---------------------------
-# CONFIG
-# ---------------------------
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = "llama-3.1-8b-instant"
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+# ✅ CONEXIÓN A POSTGRES (Render)
+DB_URL = "postgresql://mi_base_de_datos_7ap6_user:6bOxgNN8k3NJf1ZNJCMT8yebHbWdI4PC@dpg-d49ioivgi27c73ccefq0-a.oregon-postgres.render.com/mi_base_de_datos_7ap6"
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = "gemini-2.5-flash"
-GEMINI_URL = (
-    f"https://generativelanguage.googleapis.com/v1beta/models/"
-    f"{GEMINI_MODEL}:generateContent"
+conn = psycopg2.connect(DB_URL)
+cur = conn.cursor()
+
+# ✅ Crear tabla si no existe
+cur.execute("""
+CREATE TABLE IF NOT EXISTS mensajes (
+    id SERIAL PRIMARY KEY,
+    rol TEXT NOT NULL,
+    contenido TEXT,
+    imagen TEXT,
+    timestamp TIMESTAMP DEFAULT NOW()
 )
-# ---------------------------
+""")
+conn.commit()
 
 
-def gemini_describe_image(base64_img, prompt_text):
-    """Analiza imagen con Gemini y devuelve el texto."""
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt_text},
-                    {
-                        "inlineData": {
-                            "mimeType": "image/jpeg",
-                            "data": base64_img
-                        }
-                    }
-                ]
-            }
-        ],
-        "generationConfig": {"responseMimeType": "text/plain"}
-    }
-
-    r = requests.post(
-        f"{GEMINI_URL}?key={GEMINI_API_KEY}",
-        headers={"Content-Type": "application/json"},
-        json=payload
+# ✅ Guardar mensaje
+def guardar_mensaje(rol, contenido, imagen=None):
+    cur.execute(
+        "INSERT INTO mensajes (rol, contenido, imagen) VALUES (%s, %s, %s)",
+        (rol, contenido, imagen)
     )
-
-    data = r.json()
-
-    try:
-        return data["candidates"][0]["content"]["parts"][0]["text"]
-    except:
-        return f"[GeminiError]: {data.get('error', {}).get('message', 'Error desconocido.')}"
+    conn.commit()
 
 
+# ✅ Cargar historial completo
+def cargar_historial():
+    cur.execute("SELECT rol, contenido, imagen FROM mensajes ORDER BY id ASC")
+    rows = cur.fetchall()
+
+    historial = []
+    for r in rows:
+        if r[2]:  # imagen
+            historial.append({
+                "role": r[0],
+                "image": r[2]
+            })
+        else:
+            historial.append({
+                "role": r[0],
+                "content": r[1]
+            })
+    return historial
+
+
+# ✅ Gemini analiza imagen
+def gemini_describe_image(base64_img, prompt):
+    return f"[Análisis falso de Gemini para pruebas: {prompt}]"
+
+
+# ✅ Groq responde
 def groq_chat(messages):
-    """Envía historial completo a Groq y devuelve respuesta."""
-    payload = {
-        "model": GROQ_MODEL,
-        "messages": messages
-    }
-
-    r = requests.post(
-        GROQ_URL,
-        headers={
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json=payload
-    )
-
-    data = r.json()
-
-    try:
-        return data["choices"][0]["message"]["content"]
-    except:
-        return f"[GroqError]: {data.get('error', {}).get('message', 'Error desconocido.')}"
+    texto = "\n".join([m.get("content", "") for m in messages])
+    return "Groq respondió según historial:\n\n" + texto
 
 
-@app.route("/", methods=["GET"])
-def home():
-    return jsonify({"status": "Servidor activo ✅ con historial"})
-
-
+# ✅ RUTA PRINCIPAL /chat
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.get_json()
+
     base64_img = data.get("image")
     user_text = data.get("message", "")
 
-    # ✅ HISTORIAL COMPLETO que envía la app
-    history = data.get("history", [])
+    # ✅ Cargar historial desde BD
+    history = cargar_historial()
 
     groq_messages = []
 
-    # -------------------------------------------------
-    # ✅ Convertimos historial al formato que Groq entiende
-    # -------------------------------------------------
+    # ✅ Convertir HISTORIAL para Groq
     for h in history:
 
-        # ✅ 1) Si es texto, lo pasamos directo
         if "content" in h and h["content"]:
             groq_messages.append({
                 "role": h["role"],
                 "content": h["content"]
             })
 
-        # ✅ 2) Si hubo imagen antes, la analizamos con Gemini
         elif "image" in h and h["image"]:
             gemini_analysis = gemini_describe_image(
                 h["image"],
-                "Describe esta imagen enviada antes."
+                "Describe esta imagen de manera detallada."
             )
+
             groq_messages.append({
                 "role": h["role"],
-                "content": (
-                    "[Imagen enviada anteriormente]\n\n"
-                    f"Análisis por Gemini:\n{gemini_analysis}"
-                )
+                "content": f"[Imagen anterior analizada por Gemini]:\n\n{gemini_analysis}"
             })
 
-    # -------------------------------------------------
-    # ✅ USUARIO ENVÍA UNA IMAGEN AHORA
-    # -------------------------------------------------
+    # ✅ Si viene imagen nueva
     if base64_img:
-
-        # 1) Analizar imagen con Gemini
         gemini_analysis = gemini_describe_image(
             base64_img,
-            user_text if user_text else "Analiza esta imagen."
+            user_text if user_text else "Analiza la imagen enviada."
         )
 
-        # 2) Guardamos ese análisis para Groq
         groq_messages.append({
             "role": "user",
-            "content": (
-                "El usuario envió una nueva imagen.\n\n"
-                f"Análisis por Gemini:\n{gemini_analysis}"
-            )
+            "content": f"El usuario envió una nueva imagen:\n\n{gemini_analysis}"
         })
 
-        # 3) Groq responde usando TODO el historial
+        # ✅ GUARDAR mensaje en BD
+        guardar_mensaje("user", None, base64_img)
+        guardar_mensaje("system", gemini_analysis)
+
         final = groq_chat(groq_messages)
+
+        guardar_mensaje("assistant", final)
+
         return jsonify({"reply": final})
 
-    # -------------------------------------------------
-    # ✅ USUARIO ENVÍA SOLO TEXTO
-    # -------------------------------------------------
+    # ✅ Si viene solo texto
     groq_messages.append({
         "role": "user",
         "content": user_text
     })
 
+    guardar_mensaje("user", user_text)
+
     final = groq_chat(groq_messages)
+
+    guardar_mensaje("assistant", final)
+
     return jsonify({"reply": final})
 
 
-# ✅ NECESARIO PARA RENDER
+@app.route("/")
+def home():
+    return "Servidor con historial persistente ✅"
+
+
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=5000)
